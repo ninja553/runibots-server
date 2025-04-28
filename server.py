@@ -3,10 +3,8 @@ import os
 
 app = Flask(__name__)
 
-# Clave secreta para autorización (reemplaza con una clave segura)
 ADMIN_KEY = "tu_clave_secreta_admin"
 
-# Archivo para almacenar hardware_ids
 HARDWARE_IDS_FILE = "hardware_ids.txt"
 AUTHORIZED_IDS_FILE = "authorized_ids.txt"
 
