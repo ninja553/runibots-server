@@ -9,7 +9,7 @@ app = Flask(__name__)
 ADMIN_KEY = "tu_clave_secreta_admin"
 
 # URL del webhook de Discord (reemplaza con tu URL)
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/tu_webhook_aqui"
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1366414104171909191/d4McCwAD6pct0DAeF18gNIN6iD6B50tjRtqyQtnsf_l4dTnL_bM9T6EacyS3qDarOrj5"
 
 # Archivo para almacenar hardware_ids y autorizaciones
 HARDWARE_IDS_FILE = "hardware_ids.txt"
