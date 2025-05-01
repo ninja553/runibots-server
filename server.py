@@ -10,7 +10,9 @@ app = Flask(__name__)
 AUTHORIZED_FILE = "authorized_ids.txt"
 
 # URL del archivo authorized_ids.txt en GitHub (raw)
-GITHUB_AUTHORIZED_IDS_URL = "https://raw.githubusercontent.com/ninja553/runibots-data/main/authorized_ids.txt"
+GITHUB_REPO = os.getenv("GITHUB_REPO", "ninja553/runibots-data")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_AUTHORIZED_IDS_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/authorized_ids.txt"
 
 # Webhook de Discord
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1366414104171909191/d4McCwAD6pct0DAeF18gNIN6iD6B50tjRtqyQtnsf_l4dTnL_bM9T6EacyS3qDarOrj5"
@@ -25,7 +27,8 @@ def download_authorized_ids():
     """Descarga authorized_ids.txt desde GitHub si no existe localmente."""
     if not os.path.exists(AUTHORIZED_FILE):
         try:
-            response = requests.get(GITHUB_AUTHORIZED_IDS_URL)
+            headers = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+            response = requests.get(GITHUB_AUTHORIZED_IDS_URL, headers=headers)
             response.raise_for_status()
             with open(AUTHORIZED_FILE, 'w') as f:
                 f.write(response.text)
