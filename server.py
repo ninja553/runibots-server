@@ -2,25 +2,47 @@ from flask import Flask, request, jsonify
 import time
 import os
 from datetime import datetime, timedelta
+import requests
 
 app = Flask(__name__)
 
-# Archivo para almacenar hardware_ids autorizados con formato hardware_id,fecha_autorizacion,dias_validez
+# Archivo para almacenar hardware_ids autorizados
 AUTHORIZED_FILE = "authorized_ids.txt"
 
+# URL del archivo authorized_ids.txt en GitHub (raw)
+GITHUB_AUTHORIZED_IDS_URL = "https://raw.githubusercontent.com/ninja553/runibots-data/main/authorized_ids.txt"
+
+# Webhook de Discord
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1366414104171909191/d4McCwAD6pct0DAeF18gNIN6iD6B50tjRtqyQtnsf_l4dTnL_bM9T6EacyS3qDarOrj5"
+
 # Diccionario para rastrear el estado de actividad e instancias
-# Formato: {hardware_id: {"status": "active/inactive", "last_activity": timestamp, "instances": {instance_id: timestamp}, "expiration": datetime}}
 client_activity = {}
 
 # Umbral para considerar un cliente como inactivo (16 minutos = 960 segundos)
 INACTIVITY_THRESHOLD = 960
 
+def download_authorized_ids():
+    """Descarga authorized_ids.txt desde GitHub si no existe localmente."""
+    if not os.path.exists(AUTHORIZED_FILE):
+        try:
+            response = requests.get(GITHUB_AUTHORIZED_IDS_URL)
+            response.raise_for_status()
+            with open(AUTHORIZED_FILE, 'w') as f:
+                f.write(response.text)
+            print(f"Descargado {AUTHORIZED_FILE} desde GitHub")
+        except Exception as e:
+            print(f"Error al descargar authorized_ids.txt: {e}")
+
 def load_authorized_ids():
     authorized = {}
+    download_authorized_ids()  # Descarga el archivo si no existe
     if os.path.exists(AUTHORIZED_FILE):
         with open(AUTHORIZED_FILE, 'r') as f:
             for line in f:
-                parts = line.strip().split(',')
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(',')
                 if len(parts) == 3:
                     hardware_id, auth_date_str, days_valid = parts
                     try:
@@ -28,9 +50,19 @@ def load_authorized_ids():
                         days_valid = int(days_valid)
                         expiration = auth_date + timedelta(days=days_valid)
                         authorized[hardware_id] = {"expiration": expiration}
-                    except ValueError:
-                        print(f"Formato inválido en línea: {line}")
+                    except ValueError as e:
+                        print(f"Formato inválido en línea: {line}, error: {e}")
     return authorized
+
+def send_to_discord(message):
+    """Envía un mensaje al webhook de Discord."""
+    try:
+        payload = {"content": message}
+        response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
+        response.raise_for_status()
+        print(f"Mensaje enviado a Discord: {message}")
+    except Exception as e:
+        print(f"Error al enviar mensaje a Discord: {e}")
 
 @app.route('/submit_hardware_id', methods=['POST'])
 def submit_hardware_id():
@@ -39,6 +71,9 @@ def submit_hardware_id():
     instance_id = data.get('instance_id')
     if not hardware_id or not instance_id:
         return jsonify({"status": "error", "message": "Falta hardware_id o instance_id"}), 400
+    
+    # Enviar a Discord
+    send_to_discord(f"Nuevo hardware_id registrado: {hardware_id}, instance_id: {instance_id}")
     
     # Registrar la actividad inicial del cliente
     if hardware_id not in client_activity:
