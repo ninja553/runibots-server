@@ -6,8 +6,9 @@ import requests
 
 app = Flask(__name__)
 
-# Archivo para almacenar hardware_ids autorizados
+# Archivos para gestionar hardware_ids
 AUTHORIZED_FILE = "authorized_ids.txt"
+PENDING_FILE = "pending_ids.txt"  # Nuevo archivo para IDs pendientes
 
 # URL del archivo authorized_ids.txt en GitHub (raw)
 GITHUB_REPO = os.getenv("GITHUB_REPO", "ninja553/runibots-data")
@@ -19,12 +20,9 @@ DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1366414104171909191/d4Mc
 
 # Diccionario para rastrear el estado de actividad e instancias
 client_activity = {}
-
-# Umbral para considerar un cliente como inactivo (16 minutos = 960 segundos)
 INACTIVITY_THRESHOLD = 960
 
 def download_authorized_ids():
-    """Descarga authorized_ids.txt desde GitHub si no existe localmente."""
     if not os.path.exists(AUTHORIZED_FILE):
         try:
             headers = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
@@ -38,7 +36,7 @@ def download_authorized_ids():
 
 def load_authorized_ids():
     authorized = {}
-    download_authorized_ids()  # Descarga el archivo si no existe
+    download_authorized_ids()
     if os.path.exists(AUTHORIZED_FILE):
         with open(AUTHORIZED_FILE, 'r') as f:
             for line in f:
@@ -57,8 +55,12 @@ def load_authorized_ids():
                         print(f"Formato inválido en línea: {line}, error: {e}")
     return authorized
 
+def save_pending_id(hardware_id):
+    with open(PENDING_FILE, 'a') as f:
+        f.write(f"{hardware_id}\n")
+    print(f"ID pendiente guardado: {hardware_id}")
+
 def send_to_discord(message):
-    """Envía un mensaje al webhook de Discord."""
     try:
         payload = {"content": message}
         response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
@@ -78,7 +80,12 @@ def submit_hardware_id():
     # Enviar a Discord
     send_to_discord(f"Nuevo hardware_id registrado: {hardware_id}, instance_id: {instance_id}")
     
-    # Registrar la actividad inicial del cliente
+    # Guardar en pending_ids.txt si no está autorizado
+    authorized_ids = load_authorized_ids()
+    if hardware_id not in authorized_ids:
+        save_pending_id(hardware_id)
+    
+    # Registrar actividad inicial
     if hardware_id not in client_activity:
         client_activity[hardware_id] = {"status": "active", "last_activity": time.time(), "instances": {}}
     client_activity[hardware_id]["instances"][instance_id] = time.time()
@@ -101,7 +108,6 @@ def verify():
     if hardware_id in authorized_ids:
         expiration = authorized_ids[hardware_id]["expiration"]
         if current_date <= expiration:
-            # Actualizar actividad
             if hardware_id not in client_activity:
                 client_activity[hardware_id] = {"status": "active", "last_activity": time.time(), "instances": {}, "expiration": expiration}
             client_activity[hardware_id]["instances"][instance_id] = time.time()
@@ -111,6 +117,7 @@ def verify():
         else:
             return jsonify({"status": "error", "message": "Autorización expirada"}), 403
     else:
+        save_pending_id(hardware_id)  # Guardar en pending_ids.txt si no está autorizado
         return jsonify({"status": "error", "message": "No autorizado"}), 403
 
 @app.route('/report_activity', methods=['POST'])
