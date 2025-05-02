@@ -3,34 +3,84 @@ import os
 import requests
 from datetime import datetime, timedelta
 import time
+import base64
 
 app = Flask(__name__)
 
-# Clave secreta para autorización (configura en variables de entorno de Render)
+# Configuración de GitHub
+GITHUB_REPO = os.getenv("GITHUB_REPO", "ninja553/runibots-data")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_AUTHORIZED_IDS_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/authorized_ids.txt"
+GITHUB_HARDWARE_IDS_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/hardware_ids.txt"
+GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/contents"
+
+# Clave secreta para autorización
 ADMIN_KEY = os.getenv("ADMIN_KEY", "tu_clave_secreta_admin")
 
 # URL del webhook de Discord
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1366414104171909191/d4McCwAD6pct0DAeF18gNIN6iD6B50tjRtqyQtnsf_l4dTnL_bM9T6EacyS3qDarOrj5"
 
-# Archivos para hardware_ids
+# Archivos locales
 HARDWARE_IDS_FILE = "hardware_ids.txt"
 AUTHORIZED_IDS_FILE = "authorized_ids.txt"
-
-# Asegurarse de que los archivos existan
-if not os.path.exists(HARDWARE_IDS_FILE):
-    with open(HARDWARE_IDS_FILE, "w") as f:
-        pass
-
-if not os.path.exists(AUTHORIZED_IDS_FILE):
-    with open(AUTHORIZED_IDS_FILE, "w") as f:
-        f.write("hardware_id,fecha_autorizacion,dias_validez\n")
 
 # Diccionario para rastrear actividad e instancias
 client_activity = {}
 INACTIVITY_THRESHOLD = 840  # 14 minutos en segundos
 
+def download_file(url, local_file):
+    """Descarga un archivo desde GitHub si no existe localmente."""
+    if not os.path.exists(local_file):
+        try:
+            headers = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            with open(local_file, 'w') as f:
+                f.write(response.text)
+            print(f"Descargado {local_file} desde GitHub")
+        except Exception as e:
+            print(f"Error al descargar {local_file}: {e}")
+
+def upload_file(local_file, github_path):
+    """Sube un archivo a GitHub."""
+    try:
+        # Leer el archivo local
+        with open(local_file, 'r') as f:
+            content = f.read()
+        
+        # Codificar contenido en base64
+        content_b64 = base64.b64encode(content.encode()).decode()
+        
+        # Obtener el SHA del archivo existente (si existe)
+        headers = {
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        response = requests.get(f"{GITHUB_API_URL}/{github_path}", headers=headers)
+        sha = None
+        if response.status_code == 200:
+            sha = response.json().get("sha")
+        
+        # Subir el archivo
+        payload = {
+            "message": f"Update {github_path}",
+            "content": content_b64,
+            "branch": "main"
+        }
+        if sha:
+            payload["sha"] = sha
+        
+        response = requests.put(f"{GITHUB_API_URL}/{github_path}", headers=headers, json=payload)
+        response.raise_for_status()
+        print(f"Archivo {github_path} subido a GitHub")
+    except Exception as e:
+        print(f"Error al subir {github_path} a GitHub: {e}")
+
+# Descargar archivos al iniciar
+download_file(GITHUB_AUTHORIZED_IDS_URL, AUTHORIZED_IDS_FILE)
+download_file(GITHUB_HARDWARE_IDS_URL, HARDWARE_IDS_FILE)
+
 def send_to_discord(message):
-    """Envía un mensaje al webhook de Discord con depuración."""
     try:
         discord_payload = {"content": message}
         response = requests.post(DISCORD_WEBHOOK_URL, json=discord_payload)
@@ -52,6 +102,9 @@ def submit_hardware_id():
         # Guardar el hardware_id en hardware_ids.txt
         with open(HARDWARE_IDS_FILE, "a") as f:
             f.write(hardware_id + "\n")
+        
+        # Subir el archivo a GitHub
+        upload_file(HARDWARE_IDS_FILE, "hardware_ids.txt")
         
         # Enviar notificación a Discord
         send_to_discord(f"Nuevo hardware_id recibido: `{hardware_id}`, instance_id: `{instance_id}`")
@@ -77,21 +130,28 @@ def verify():
         if not hardware_id:
             return jsonify({"status": "error", "message": "hardware_id is required"}), 400
         
+        # Descargar el archivo más reciente desde GitHub
+        download_file(GITHUB_AUTHORIZED_IDS_URL, AUTHORIZED_IDS_FILE)
+        
         # Verificar autorización
         authorized_ids = []
+        print(f"Leyendo archivo {AUTHORIZED_IDS_FILE}")
         with open(AUTHORIZED_IDS_FILE, "r") as f:
-            lines = f.readlines()
-            for line in lines[1:]:  # Saltar encabezado
+            content = f.readlines()
+            print(f"Contenido de {AUTHORIZED_IDS_FILE}: {content}")
+            for line in content[1:]:  # Saltar encabezado
                 if line.strip():
                     parts = line.strip().split(",")
                     if len(parts) == 3:
                         auth_hardware_id, auth_date, validity_days = parts
+                        print(f"Comparando {auth_hardware_id} con {hardware_id}")
                         if auth_hardware_id == hardware_id:
                             try:
                                 auth_date = datetime.strptime(auth_date, "%Y-%m-%d")
                                 validity_days = int(validity_days)
                                 expiration_date = auth_date + timedelta(days=validity_days)
                                 current_date = datetime.now()
+                                print(f"Fecha actual: {current_date}, Expiración: {expiration_date}")
                                 if current_date <= expiration_date:
                                     authorized_ids.append({
                                         "hardware_id": auth_hardware_id,
@@ -99,13 +159,13 @@ def verify():
                                         "dias_validez": validity_days,
                                         "fecha_expiracion": expiration_date.strftime("%Y-%m-%d")
                                     })
-                                    # Actualizar actividad
                                     if hardware_id not in client_activity:
                                         client_activity[hardware_id] = {"status": "active", "last_activity": time.time(), "instances": {}}
                                     client_activity[hardware_id]["instances"][instance_id] = time.time()
                                     client_activity[hardware_id]["status"] = "active"
                                     client_activity[hardware_id]["last_activity"] = time.time()
-                            except ValueError:
+                            except ValueError as e:
+                                print(f"Error al parsear fecha: {e}")
                                 continue
         
         if authorized_ids:
@@ -129,9 +189,16 @@ def authorize():
         if admin_key != ADMIN_KEY:
             return jsonify({"status": "error", "message": "Invalid admin_key"}), 403
         
+        # Descargar el archivo más reciente desde GitHub
+        download_file(GITHUB_AUTHORIZED_IDS_URL, AUTHORIZED_IDS_FILE)
+        
+        # Agregar la nueva autorización
         current_date = datetime.now().strftime("%Y-%m-%d")
         with open(AUTHORIZED_IDS_FILE, "a") as f:
             f.write(f"{hardware_id},{current_date},{validity_days}\n")
+        
+        # Subir el archivo a GitHub
+        upload_file(AUTHORIZED_IDS_FILE, "authorized_ids.txt")
         
         send_to_discord(f"Hardware_id autorizado: `{hardware_id}`, válidez: {validity_days} días")
         return jsonify({"status": "success", "message": "hardware_id authorized", "validity_days": validity_days}), 200
@@ -141,6 +208,9 @@ def authorize():
 @app.route("/get_hardware_ids", methods=["GET"])
 def get_hardware_ids():
     try:
+        # Descargar el archivo más reciente desde GitHub
+        download_file(GITHUB_HARDWARE_IDS_URL, HARDWARE_IDS_FILE)
+        
         with open(HARDWARE_IDS_FILE, "r") as f:
             hardware_ids = [line.strip() for line in f if line.strip()]
         return jsonify({"status": "success", "hardware_ids": hardware_ids}), 200
@@ -150,6 +220,9 @@ def get_hardware_ids():
 @app.route("/get_authorized_ids", methods=["GET"])
 def get_authorized_ids():
     try:
+        # Descargar el archivo más reciente desde GitHub
+        download_file(GITHUB_AUTHORIZED_IDS_URL, AUTHORIZED_IDS_FILE)
+        
         authorized_ids = []
         with open(AUTHORIZED_IDS_FILE, "r") as f:
             lines = f.readlines()
@@ -190,6 +263,10 @@ def revoke():
         if admin_key != ADMIN_KEY:
             return jsonify({"status": "error", "message": "Invalid admin_key"}), 403
         
+        # Descargar el archivo más reciente desde GitHub
+        download_file(GITHUB_AUTHORIZED_IDS_URL, AUTHORIZED_IDS_FILE)
+        
+        # Leer y reescribir el archivo excluyendo el hardware_id revocado
         lines = []
         with open(AUTHORIZED_IDS_FILE, "r") as f:
             lines = f.readlines()
@@ -199,6 +276,9 @@ def revoke():
             for line in lines[1:]:
                 if line.strip() and not line.startswith(f"{hardware_id},"):
                     f.write(line)
+        
+        # Subir el archivo a GitHub
+        upload_file(AUTHORIZED_IDS_FILE, "authorized_ids.txt")
         
         send_to_discord(f"Hardware_id revocado: `{hardware_id}`")
         return jsonify({"status": "success", "message": f"hardware_id {hardware_id} revoked"}), 200
