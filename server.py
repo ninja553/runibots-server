@@ -20,8 +20,8 @@ DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1366414104171909191/d4Mc
 # Diccionario para rastrear el estado de actividad e instancias
 client_activity = {}
 
-# Umbral para considerar un cliente como inactivo (14 minutos = 840 segundos)
-INACTIVITY_THRESHOLD = 840
+# Umbral para considerar un cliente como inactivo (16 minutos = 960 segundos)
+INACTIVITY_THRESHOLD = 960
 
 def download_authorized_ids():
     """Descarga authorized_ids.txt desde GitHub si no existe localmente."""
@@ -101,16 +101,13 @@ def verify():
     if hardware_id in authorized_ids:
         expiration = authorized_ids[hardware_id]["expiration"]
         if current_date <= expiration:
+            # Actualizar actividad
             if hardware_id not in client_activity:
                 client_activity[hardware_id] = {"status": "active", "last_activity": time.time(), "instances": {}, "expiration": expiration}
             client_activity[hardware_id]["instances"][instance_id] = time.time()
             client_activity[hardware_id]["status"] = "active"
             client_activity[hardware_id]["last_activity"] = time.time()
-            return jsonify({
-                "status": "success",
-                "message": "Autorizado",
-                "expiration": expiration.isoformat()  # Enviar la fecha de expiración
-            }), 200
+            return jsonify({"status": "success", "message": "Autorizado"}), 200
         else:
             return jsonify({"status": "error", "message": "Autorización expirada"}), 403
     else:
