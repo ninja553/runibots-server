@@ -15,10 +15,8 @@ GITHUB_AUTHORIZED_IDS_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/ma
 GITHUB_HARDWARE_IDS_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/hardware_ids.txt"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/contents"
 
-# Clave secreta para autorización
-ADMIN_KEY = os.getenv("ADMIN_KEY")
-if not ADMIN_KEY:
-    raise ValueError("ADMIN_KEY no está configurada en las variables de entorno")
+# Clave secreta para autorización (valor por defecto temporal)
+ADMIN_KEY = os.getenv("ADMIN_KEY", "tu_clave_secreta_admin")
 
 # URL del webhook de Discord
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1366414104171909191/d4McCwAD6pct0DAeF18gNIN6iD6B50tjRtqyQtnsf_l4dTnL_bM9T6EacyS3qDarOrj5"
